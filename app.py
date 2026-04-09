@@ -1,28 +1,44 @@
 import streamlit as st
+import yfinance as yf
 
 st.set_page_config(page_title="Structured Notes Builder", layout="wide")
 
 st.title("Structured Notes Builder")
-st.subheader("Versión inicial de la app")
 
-col1, col2 = st.columns(2)
+with st.sidebar:
+    st.header("Inputs")
 
-with col1:
-    ticker = st.selectbox("Ticker", ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"])
-    notional = st.number_input("Monto de inversión (USD)", min_value=100000, value=100000, step=1000)
+    ticker = st.text_input("Ticker", value="AAPL", placeholder="Ej. AAPL").upper()
 
-with col2:
-    tenor = st.selectbox("Plazo", ["3 meses", "4 meses", "5 meses", "6 meses"])
     strategy = st.selectbox(
-        "Estrategia",
-        ["Capital Protected Note", "Yield Enhancement Note", "Reverse Convertible"]
+        "Strategy",
+        [
+            "Long Call",
+            "Short Call",
+            "Long Put",
+            "Short Put",
+            "Collar",
+            "Straddle",
+            "Strangle",
+            "Butterfly",
+            "Condor"
+        ]
     )
 
-st.markdown("### Resumen")
-st.write(f"**Ticker:** {ticker}")
-st.write(f"**Monto:** ${notional:,.0f}")
-st.write(f"**Plazo:** {tenor}")
-st.write(f"**Estrategia:** {strategy}")
+    load_data = st.button("Load Market Data")
 
-if st.button("Calcular"):
-    st.success("La app ya está funcionando. El siguiente paso será conectar la lógica financiera.")
+if load_data:
+    try:
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="5d")
+
+        if hist.empty:
+            st.error("No se encontró información para ese ticker.")
+        else:
+            last_price = hist["Close"].iloc[-1]
+            st.success(f"Ticker cargado correctamente: {ticker}")
+            st.write(f"Último cierre disponible: ${last_price:,.2f}")
+            st.write(f"Estrategia seleccionada: {strategy}")
+
+    except Exception as e:
+        st.error(f"Error al obtener datos: {e}")
