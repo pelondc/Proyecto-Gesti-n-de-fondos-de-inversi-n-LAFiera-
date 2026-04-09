@@ -170,11 +170,8 @@ def get_full_market_data(ticker_symbol: str):
     hist_1y = hist_1y.dropna().copy()
 
     last_close = float(hist_1y["Close"].iloc[-1])
-    prev_close = float(hist_1y["Close"].iloc[-2])
-    today_open = float(hist_1y["Open"].iloc[-1])
     today_high = float(hist_1y["High"].iloc[-1])
     today_low = float(hist_1y["Low"].iloc[-1])
-    today_volume = float(hist_1y["Volume"].iloc[-1])
 
     currency = "USD"
     try:
@@ -216,10 +213,8 @@ def get_full_market_data(ticker_symbol: str):
         "fx_rate_to_usd": fx_rate_to_usd,
         "last_close": last_close,
         "price_usd": price_usd,
-        "today_open": today_open,
         "today_high": today_high,
         "today_low": today_low,
-        "today_volume": today_volume,
         "high_52": high_52,
         "low_52": low_52,
         "one_month_return": one_month_return,
@@ -278,39 +273,20 @@ def calculate_volatility(hist_1y: pd.DataFrame, vol_window_label: str):
         "30D": 30,
         "60D": 60,
         "90D": 90,
-        "1Y": 252,
+        "1Y": min(252, len(hist_1y) - 1),
     }
 
     days = mapping[vol_window_label]
-    if len(hist_1y) < days + 1:
+    if days <= 1 or len(hist_1y) < days + 1:
         return np.nan
 
     subset = hist_1y.tail(days).copy()
     returns = subset["Close"].pct_change().dropna()
+
     if returns.empty:
         return np.nan
 
     return float(returns.std() * np.sqrt(252) * 100)
-
-
-def calculate_average_volume(hist_1y: pd.DataFrame, volume_window_label: str):
-    if hist_1y is None or hist_1y.empty:
-        return np.nan
-
-    mapping = {
-        "1D": 1,
-        "5D": 5,
-        "20D": 20,
-        "30D": 30,
-        "60D": 60,
-    }
-
-    days = mapping[volume_window_label]
-    if len(hist_1y) < days:
-        return np.nan
-
-    subset = hist_1y.tail(days).copy()
-    return float(subset["Volume"].mean())
 
 
 def build_price_chart(chart_df: pd.DataFrame, ticker: str, currency: str, selected_period: str):
@@ -392,6 +368,10 @@ if load_data or (st.session_state.market_data is None and ticker):
 data = st.session_state.market_data
 loaded_ticker = st.session_state.loaded_ticker or ticker
 
+# defaults visuales
+default_tenor = "6 Months"
+default_strategy = "Long Stock"
+
 # ---------------------------
 # HEADER
 # ---------------------------
@@ -401,19 +381,12 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Strategy defaults for top header
-default_tenor = "6 Months"
-default_strategy = "Long Stock"
-
 top1, top2, top3, top4 = st.columns(4)
 top1.metric("Ticker", loaded_ticker if loaded_ticker else "—")
 top2.metric("Total Note Notional", f"${total_note_notional:,.0f}")
 top3.metric("Tenor", default_tenor)
 top4.metric("Strategy", default_strategy)
 
-# ---------------------------
-# TABS
-# ---------------------------
 tab1, tab2, tab3, tab4 = st.tabs([
     "Market Snapshot",
     "Strategy Builder",
@@ -421,9 +394,6 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "Executive Summary"
 ])
 
-# ===========================
-# TAB 1 - MARKET SNAPSHOT
-# ===========================
 with tab1:
     if data:
         st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -434,14 +404,14 @@ with tab1:
         row0[1].metric("Price (Local)", format_number(data["last_close"], prefix=f"{data['currency']} "))
         row0[2].metric("FX to USD", format_number(data["fx_rate_to_usd"], decimals=4))
         row0[3].metric("Price (USD)", format_number(data["price_usd"], prefix="$"))
-        row0[4].metric("52W Range", f"{format_number(data['low_52'], prefix='')} - {format_number(data['high_52'])} {data['currency']}")
+        row0[4].metric("52W Range", f"{format_number(data['low_52'])} - {format_number(data['high_52'])} {data['currency']}")
 
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">Snapshot Controls</div>', unsafe_allow_html=True)
 
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         selected_period = c1.selectbox(
             "Return & Chart Period",
             ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y"],
@@ -454,32 +424,24 @@ with tab1:
             index=1,
             key="vol_window"
         )
-        volume_window = c3.selectbox(
-            "Average Volume Window",
-            ["1D", "5D", "20D", "30D", "60D"],
-            index=2,
-            key="volume_window"
-        )
 
         st.markdown('</div>', unsafe_allow_html=True)
 
         selected_return = calculate_selected_return(data["hist_1y"], selected_period)
         selected_vol = calculate_volatility(data["hist_1y"], vol_window)
-        selected_avg_volume = calculate_average_volume(data["hist_1y"], volume_window)
 
         row1 = st.columns(5)
         row1[0].metric(f"{selected_period} Return", format_number(selected_return, suffix="%"))
         row1[1].metric(f"{vol_window} Volatility", format_number(selected_vol, suffix="%"))
-        row1[2].metric(f"{volume_window} Avg Volume", format_number(selected_avg_volume, decimals=0))
-        row1[3].metric("Day High", format_number(data["today_high"], prefix=f"{data['currency']} "))
-        row1[4].metric("Day Low", format_number(data["today_low"], prefix=f"{data['currency']} "))
+        row1[2].metric("Day High", format_number(data["today_high"], prefix=f"{data['currency']} "))
+        row1[3].metric("Day Low", format_number(data["today_low"], prefix=f"{data['currency']} "))
+        row1[4].metric("YTD Return", format_number(data["ytd_return"], suffix="%"))
 
-        row2 = st.columns(5)
+        row2 = st.columns(4)
         row2[0].metric("1M Return", format_number(data["one_month_return"], suffix="%"))
         row2[1].metric("3M Return", format_number(data["three_month_return"], suffix="%"))
         row2[2].metric("6M Return", format_number(data["six_month_return"], suffix="%"))
-        row2[3].metric("YTD Return", format_number(data["ytd_return"], suffix="%"))
-        row2[4].metric("1Y Return", format_number(data["one_year_return"], suffix="%"))
+        row2[3].metric("1Y Return", format_number(data["one_year_return"], suffix="%"))
 
         chart_df = get_chart_data(loaded_ticker, selected_period)
 
@@ -493,16 +455,13 @@ with tab1:
             st.warning("No chart data available for the selected period.")
 
         st.markdown(
-            '<div class="small-note">The chart and dynamic metrics update automatically when you change the snapshot controls.</div>',
+            '<div class="small-note">The chart and the selected volatility update automatically when you change the controls.</div>',
             unsafe_allow_html=True
         )
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.warning("Load a ticker first to view the market snapshot.")
 
-# ===========================
-# TAB 2 - STRATEGY BUILDER
-# ===========================
 with tab2:
     sb1, sb2, sb3 = st.columns(3)
 
@@ -571,97 +530,14 @@ with tab2:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Indicative Legs</div>', unsafe_allow_html=True)
-
-    if strategy in ["Long Call", "Call"]:
-        st.write("- Long 1 ATM Call")
-    elif strategy == "Short Call":
-        st.write("- Short 1 ATM Call")
-    elif strategy in ["Long Put", "Put"]:
-        st.write("- Long 1 ATM Put")
-    elif strategy == "Short Put":
-        st.write("- Short 1 ATM Put")
-    elif strategy in ["Straddle", "Cono Largo"]:
-        st.write("- Long 1 ATM Call")
-        st.write("- Long 1 ATM Put")
-    elif strategy == "Cono Corto":
-        st.write("- Short 1 ATM Call")
-        st.write("- Short 1 ATM Put")
-    elif strategy == "Strangle":
-        st.write("- Long 1 OTM Call")
-        st.write("- Long 1 OTM Put")
-    elif strategy == "Collar":
-        st.write("- Long Underlying")
-        st.write("- Long Protective Put")
-        st.write("- Short Covered Call")
-    elif strategy == "Butterfly":
-        st.write("- Long 1 Call K1")
-        st.write("- Short 2 Calls K2")
-        st.write("- Long 1 Call K3")
-    elif strategy == "Condor":
-        st.write("- Long Wing")
-        st.write("- Short Inner Spread")
-        st.write("- Long Wing")
-    elif strategy == "Long Stock":
-        st.write("- Long Underlying")
-    elif strategy == "Short Stock":
-        st.write("- Short Underlying")
-    else:
-        st.write("- Strategy legs to be defined")
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ===========================
-# TAB 3 - SCENARIO ANALYSIS
-# ===========================
 with tab3:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Scenario Analysis</div>', unsafe_allow_html=True)
-
     st.write("This tab will evaluate how the selected strategy behaves under different market conditions.")
-    st.write("Indicative scenarios to include:")
-    st.write("- Bullish scenario")
-    st.write("- Base scenario")
-    st.write("- Bearish scenario")
-    st.write("- Sideways scenario")
-    st.write("- High volatility scenario")
-    st.write("- Low volatility scenario")
-
-    if data:
-        base_spot = data["last_close"]
-        scenario_df = pd.DataFrame({
-            "Scenario": ["Bullish", "Base", "Bearish"],
-            "Indicative Underlying Price": [
-                round(base_spot * 1.10, 2),
-                round(base_spot, 2),
-                round(base_spot * 0.90, 2)
-            ]
-        })
-        st.dataframe(scenario_df, use_container_width=True)
-
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ===========================
-# TAB 4 - EXECUTIVE SUMMARY
-# ===========================
 with tab4:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Executive Summary</div>', unsafe_allow_html=True)
-
-    if data:
-        st.write(
-            f"The selected underlying is **{loaded_ticker}**, currently trading in **{data['currency']}**, "
-            f"with an indicative USD reference price of **{format_number(data['price_usd'], prefix='$')}**. "
-            f"The total note notional is **${total_note_notional:,.0f}**."
-        )
-        st.write(
-            "This interface is designed to separate market analysis, strategy construction, scenario evaluation "
-            "and executive communication into distinct modules."
-        )
-    else:
-        st.write(
-            "Once ticker data is loaded, this section will summarize the underlying, note notional and strategic rationale."
-        )
-
+    st.write("This tab will summarize the underlying, note notional and strategic rationale.")
     st.markdown('</div>', unsafe_allow_html=True)
