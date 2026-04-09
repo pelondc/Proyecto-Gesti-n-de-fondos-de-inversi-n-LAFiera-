@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 st.set_page_config(
-    page_title="Structured Notes Builder",
+    page_title="Proyecto Gestión de Fondos LAFiera",
     page_icon="📈",
     layout="wide"
 )
