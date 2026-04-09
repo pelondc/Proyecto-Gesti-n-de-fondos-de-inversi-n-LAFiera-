@@ -17,32 +17,41 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main-title {
-        font-size: 2.8rem;
+        font-size: 2.35rem;
         font-weight: 800;
-        margin-bottom: 0.15rem;
+        margin-bottom: 0.1rem;
         color: #1f2937;
     }
     .subtitle {
-        font-size: 1.05rem;
+        font-size: 0.95rem;
         color: #6b7280;
-        margin-bottom: 1.4rem;
+        margin-bottom: 1.2rem;
     }
     .card {
         background-color: #f8fafc;
         border: 1px solid #e5e7eb;
-        border-radius: 18px;
-        padding: 1.15rem 1.15rem 1rem 1.15rem;
-        margin-bottom: 1rem;
+        border-radius: 16px;
+        padding: 0.95rem 1rem 0.85rem 1rem;
+        margin-bottom: 0.9rem;
     }
     .section-title {
-        font-size: 1.08rem;
+        font-size: 1rem;
         font-weight: 700;
         color: #111827;
-        margin-bottom: 0.7rem;
+        margin-bottom: 0.6rem;
     }
     .small-note {
-        font-size: 0.9rem;
+        font-size: 0.84rem;
         color: #6b7280;
+    }
+    div[data-testid="metric-container"] {
+        padding: 0.45rem 0.2rem 0.35rem 0.2rem;
+    }
+    div[data-testid="metric-container"] label {
+        font-size: 0.78rem !important;
+    }
+    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+        font-size: 0.95rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -67,6 +76,16 @@ def safe_pct_change(current_value, previous_value):
     return ((current_value / previous_value) - 1) * 100
 
 
+def tenor_to_years(tenor: str) -> float:
+    mapping = {
+        "3 Months": 3 / 12,
+        "4 Months": 4 / 12,
+        "5 Months": 5 / 12,
+        "6 Months": 6 / 12,
+    }
+    return mapping.get(tenor, 0.25)
+
+
 def strategy_description(strategy_name: str):
     descriptions = {
         "Long Stock": "Directional bullish exposure through the underlying stock.",
@@ -88,20 +107,7 @@ def strategy_description(strategy_name: str):
     return descriptions.get(strategy_name, "No description available.")
 
 
-def tenor_to_years(tenor: str) -> float:
-    mapping = {
-        "3 Months": 3 / 12,
-        "4 Months": 4 / 12,
-        "5 Months": 5 / 12,
-        "6 Months": 6 / 12,
-    }
-    return mapping.get(tenor, 0.25)
-
-
 def get_period_config(selected_period: str):
-    """
-    Define qué descargar para la gráfica según el periodo seleccionado.
-    """
     configs = {
         "1D": {"period": "1d", "interval": "5m"},
         "5D": {"period": "5d", "interval": "30m"},
@@ -126,6 +132,9 @@ def get_return_window_days(selected_period: str):
     return mapping.get(selected_period, None)
 
 
+# ---------------------------
+# DATA FUNCTIONS
+# ---------------------------
 @st.cache_data(ttl=900)
 def get_fx_rate_to_usd(currency: str):
     if not currency or currency.upper() == "USD":
@@ -148,9 +157,6 @@ def get_fx_rate_to_usd(currency: str):
 
 @st.cache_data(ttl=900)
 def get_full_market_data(ticker_symbol: str):
-    """
-    Datos base de 1 año para métricas generales.
-    """
     ticker_symbol = ticker_symbol.strip().upper()
     if not ticker_symbol:
         return None
@@ -170,7 +176,6 @@ def get_full_market_data(ticker_symbol: str):
     today_low = float(hist_1y["Low"].iloc[-1])
     today_volume = float(hist_1y["Volume"].iloc[-1])
 
-    # Moneda
     currency = "USD"
     try:
         fast_info = stock.fast_info
@@ -181,17 +186,21 @@ def get_full_market_data(ticker_symbol: str):
     fx_rate_to_usd = get_fx_rate_to_usd(currency)
     price_usd = last_close * fx_rate_to_usd if fx_rate_to_usd is not None else None
 
-    # Retornos base
-    daily_return = safe_pct_change(last_close, prev_close)
+    high_52 = float(hist_1y["High"].max())
+    low_52 = float(hist_1y["Low"].min())
 
-    five_day_return = np.nan
+    current_year = datetime.now().year
+    hist_ytd = hist_1y[hist_1y.index.year == current_year].copy()
+    ytd_return = np.nan
+    if not hist_ytd.empty and len(hist_ytd) >= 2:
+        ytd_start = float(hist_ytd["Close"].iloc[0])
+        ytd_return = safe_pct_change(last_close, ytd_start)
+
     one_month_return = np.nan
     three_month_return = np.nan
     six_month_return = np.nan
     one_year_return = np.nan
 
-    if len(hist_1y) >= 6:
-        five_day_return = safe_pct_change(last_close, float(hist_1y["Close"].iloc[-6]))
     if len(hist_1y) >= 22:
         one_month_return = safe_pct_change(last_close, float(hist_1y["Close"].iloc[-22]))
     if len(hist_1y) >= 64:
@@ -200,18 +209,6 @@ def get_full_market_data(ticker_symbol: str):
         six_month_return = safe_pct_change(last_close, float(hist_1y["Close"].iloc[-127]))
     if len(hist_1y) >= 252:
         one_year_return = safe_pct_change(last_close, float(hist_1y["Close"].iloc[0]))
-
-    # YTD
-    current_year = datetime.now().year
-    hist_ytd = hist_1y[hist_1y.index.year == current_year].copy()
-    ytd_return = np.nan
-    if not hist_ytd.empty and len(hist_ytd) >= 2:
-        ytd_start = float(hist_ytd["Close"].iloc[0])
-        ytd_return = safe_pct_change(last_close, ytd_start)
-
-    # Rango 52W
-    high_52 = float(hist_1y["High"].max())
-    low_52 = float(hist_1y["Low"].min())
 
     return {
         "ticker": ticker_symbol,
@@ -225,8 +222,6 @@ def get_full_market_data(ticker_symbol: str):
         "today_volume": today_volume,
         "high_52": high_52,
         "low_52": low_52,
-        "daily_return": daily_return,
-        "five_day_return": five_day_return,
         "one_month_return": one_month_return,
         "three_month_return": three_month_return,
         "six_month_return": six_month_return,
@@ -238,9 +233,6 @@ def get_full_market_data(ticker_symbol: str):
 
 @st.cache_data(ttl=900)
 def get_chart_data(ticker_symbol: str, selected_period: str):
-    """
-    Datos de gráfica según el periodo elegido.
-    """
     config = get_period_config(selected_period)
     stock = yf.Ticker(ticker_symbol)
     hist = stock.history(
@@ -252,8 +244,7 @@ def get_chart_data(ticker_symbol: str, selected_period: str):
     if hist.empty:
         return None
 
-    hist = hist.dropna().copy()
-    return hist
+    return hist.dropna().copy()
 
 
 def calculate_selected_return(hist_1y: pd.DataFrame, selected_period: str):
@@ -271,10 +262,7 @@ def calculate_selected_return(hist_1y: pd.DataFrame, selected_period: str):
         return safe_pct_change(last_close, start_price)
 
     window_days = get_return_window_days(selected_period)
-    if window_days is None:
-        return np.nan
-
-    if len(hist_1y) <= window_days:
+    if window_days is None or len(hist_1y) <= window_days:
         return np.nan
 
     start_price = float(hist_1y["Close"].iloc[-(window_days + 1)])
@@ -344,64 +332,65 @@ def build_price_chart(chart_df: pd.DataFrame, ticker: str, currency: str, select
         xaxis_title="Date",
         yaxis_title=f"Price ({currency})",
         template="plotly_white",
-        height=460,
-        margin=dict(l=20, r=20, t=60, b=20),
-        hovermode="x unified"
+        height=420,
+        margin=dict(l=20, r=20, t=55, b=20),
+        hovermode="x unified",
+        showlegend=False
     )
 
     return fig
 
 
 # ---------------------------
+# SESSION STATE
+# ---------------------------
+if "market_data" not in st.session_state:
+    st.session_state.market_data = None
+
+if "loaded_ticker" not in st.session_state:
+    st.session_state.loaded_ticker = None
+
+# ---------------------------
 # SIDEBAR
 # ---------------------------
 with st.sidebar:
-    st.header("Inputs")
+    st.header("Global Inputs")
 
     ticker = st.text_input(
         "Ticker",
-        value="AAPL",
+        value=st.session_state.loaded_ticker or "AAPL",
         placeholder="Ej. AAPL"
     ).upper().strip()
 
-    notional = st.number_input(
-        "Investment Amount (USD)",
+    total_note_notional = st.number_input(
+        "Total Note Notional (USD)",
         min_value=100000,
         value=100000,
         step=5000
     )
 
-    tenor = st.selectbox(
-        "Tenor",
-        ["3 Months", "4 Months", "5 Months", "6 Months"]
-    )
-
-    strategy_family = st.selectbox(
-        "Strategy Family",
-        [
-            "Directional",
-            "Volatility",
-            "Protection / Hedging",
-            "Range Structures",
-            "Single Option"
-        ]
-    )
-
-    strategy_options = {
-        "Directional": ["Long Stock", "Short Stock", "Long Call", "Short Put", "Long Put", "Short Call"],
-        "Volatility": ["Straddle", "Strangle", "Cono Largo", "Cono Corto"],
-        "Protection / Hedging": ["Collar"],
-        "Range Structures": ["Butterfly", "Condor"],
-        "Single Option": ["Call", "Put"]
-    }
-
-    strategy = st.selectbox(
-        "Strategy",
-        strategy_options[strategy_family]
-    )
-
     st.markdown("---")
-    load_data = st.button("Load Market Data", use_container_width=True)
+    load_data = st.button("Load / Refresh Ticker Data", use_container_width=True)
+
+# ---------------------------
+# LOAD DATA
+# ---------------------------
+if load_data or (st.session_state.market_data is None and ticker):
+    try:
+        data = get_full_market_data(ticker)
+        if data is None:
+            st.session_state.market_data = None
+            st.session_state.loaded_ticker = None
+            st.error("No se encontró información suficiente para ese ticker.")
+        else:
+            st.session_state.market_data = data
+            st.session_state.loaded_ticker = ticker
+    except Exception as e:
+        st.session_state.market_data = None
+        st.error(f"Error al obtener datos de mercado: {e}")
+
+data = st.session_state.market_data
+loaded_ticker = st.session_state.loaded_ticker or ticker
 
 # ---------------------------
 # HEADER
@@ -412,34 +401,18 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ---------------------------
-# MÉTRICAS SUPERIORES
-# ---------------------------
+# Strategy defaults for top header
+default_tenor = "6 Months"
+default_strategy = "Long Stock"
+
 top1, top2, top3, top4 = st.columns(4)
-top1.metric("Ticker", ticker if ticker else "—")
-top2.metric("Notional", f"${notional:,.0f}")
-top3.metric("Tenor", tenor)
-top4.metric("Strategy", strategy)
-
-st.markdown("")
+top1.metric("Ticker", loaded_ticker if loaded_ticker else "—")
+top2.metric("Total Note Notional", f"${total_note_notional:,.0f}")
+top3.metric("Tenor", default_tenor)
+top4.metric("Strategy", default_strategy)
 
 # ---------------------------
-# CARGA DE DATOS
-# ---------------------------
-data = None
-
-if load_data:
-    try:
-        data = get_full_market_data(ticker)
-        if data is None:
-            st.error("No se encontró información suficiente para ese ticker.")
-    except Exception as e:
-        st.error(f"Error al obtener datos de mercado: {e}")
-else:
-    st.info("Primero carga los datos de mercado para habilitar el snapshot y la construcción de estrategia.")
-
-# ---------------------------
-# TABS PRINCIPALES
+# TABS
 # ---------------------------
 tab1, tab2, tab3, tab4 = st.tabs([
     "Market Snapshot",
@@ -457,11 +430,11 @@ with tab1:
         st.markdown('<div class="section-title">Pricing and Currency</div>', unsafe_allow_html=True)
 
         row0 = st.columns(5)
-        row0[0].metric("Local Currency", data["currency"] if data["currency"] else "—")
+        row0[0].metric("Local Currency", data["currency"])
         row0[1].metric("Price (Local)", format_number(data["last_close"], prefix=f"{data['currency']} "))
         row0[2].metric("FX to USD", format_number(data["fx_rate_to_usd"], decimals=4))
         row0[3].metric("Price (USD)", format_number(data["price_usd"], prefix="$"))
-        row0[4].metric("52W Range", f"{format_number(data['low_52'], prefix=data['currency'] + ' ')} - {format_number(data['high_52'], prefix=data['currency'] + ' ')}")
+        row0[4].metric("52W Range", f"{format_number(data['low_52'], prefix='')} - {format_number(data['high_52'])} {data['currency']}")
 
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -472,17 +445,20 @@ with tab1:
         selected_period = c1.selectbox(
             "Return & Chart Period",
             ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y"],
-            index=2
+            index=2,
+            key="selected_period"
         )
         vol_window = c2.selectbox(
             "Volatility Window",
             ["20D", "30D", "60D", "90D", "1Y"],
-            index=1
+            index=1,
+            key="vol_window"
         )
         volume_window = c3.selectbox(
             "Average Volume Window",
             ["1D", "5D", "20D", "30D", "60D"],
-            index=2
+            index=2,
+            key="volume_window"
         )
 
         st.markdown('</div>', unsafe_allow_html=True)
@@ -505,57 +481,92 @@ with tab1:
         row2[3].metric("YTD Return", format_number(data["ytd_return"], suffix="%"))
         row2[4].metric("1Y Return", format_number(data["one_year_return"], suffix="%"))
 
-        chart_df = get_chart_data(ticker, selected_period)
+        chart_df = get_chart_data(loaded_ticker, selected_period)
 
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">Interactive Price Chart</div>', unsafe_allow_html=True)
 
         if chart_df is not None and not chart_df.empty:
-            fig = build_price_chart(chart_df, ticker, data["currency"], selected_period)
+            fig = build_price_chart(chart_df, loaded_ticker, data["currency"], selected_period)
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning("No chart data available for the selected period.")
 
         st.markdown(
-            '<div class="small-note">The chart automatically adjusts to the selected return period. Forecast can be added later as a separate analytical layer.</div>',
+            '<div class="small-note">The chart and dynamic metrics update automatically when you change the snapshot controls.</div>',
             unsafe_allow_html=True
         )
         st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.warning("Load market data first to view the snapshot.")
+        st.warning("Load a ticker first to view the market snapshot.")
 
 # ===========================
 # TAB 2 - STRATEGY BUILDER
 # ===========================
 with tab2:
+    sb1, sb2, sb3 = st.columns(3)
+
+    tenor = sb1.selectbox(
+        "Tenor",
+        ["3 Months", "4 Months", "5 Months", "6 Months"],
+        index=3,
+        key="builder_tenor"
+    )
+
+    strategy_family = sb2.selectbox(
+        "Strategy Family",
+        [
+            "Directional",
+            "Volatility",
+            "Protection / Hedging",
+            "Range Structures",
+            "Single Option"
+        ],
+        key="builder_family"
+    )
+
+    strategy_options = {
+        "Directional": ["Long Stock", "Short Stock", "Long Call", "Short Put", "Long Put", "Short Call"],
+        "Volatility": ["Straddle", "Strangle", "Cono Largo", "Cono Corto"],
+        "Protection / Hedging": ["Collar"],
+        "Range Structures": ["Butterfly", "Condor"],
+        "Single Option": ["Call", "Put"]
+    }
+
+    strategy = sb3.selectbox(
+        "Strategy",
+        strategy_options[strategy_family],
+        key="builder_strategy"
+    )
+
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Strategy Overview</div>', unsafe_allow_html=True)
 
     left, right = st.columns([1.15, 1])
 
     with left:
-        st.write(f"**Strategy Family:** {strategy_family}")
-        st.write(f"**Selected Strategy:** {strategy}")
+        st.write(f"**Total Note Notional:** ${total_note_notional:,.0f}")
         st.write(f"**Tenor:** {tenor}")
         st.write(f"**Tenor in Years:** {tenor_to_years(tenor):.4f}")
-        st.write(f"**Investment Amount:** ${notional:,.0f}")
+        st.write(f"**Strategy Family:** {strategy_family}")
+        st.write(f"**Selected Strategy:** {strategy}")
 
         if data:
-            st.write(f"**Underlying:** {ticker}")
+            st.write(f"**Underlying:** {loaded_ticker}")
             st.write(f"**Spot (Local):** {data['currency']} {data['last_close']:,.2f}")
             st.write(f"**Spot (USD):** {format_number(data['price_usd'], prefix='$')}")
             st.write(f"**Indicative ATM Strike (Local):** {data['currency']} {data['last_close']:,.2f}")
             if data["price_usd"] and data["price_usd"] > 0:
-                units = notional / data["price_usd"]
+                units = total_note_notional / data["price_usd"]
                 st.write(f"**Indicative Units at Spot:** {units:,.2f}")
 
     with right:
         st.write("**Description**")
         st.write(strategy_description(strategy))
-        st.write("**Indicative Structure Logic**")
+        st.write("**Builder Scope**")
         st.write(
-            "This section is intended to become the core builder of the selected structure. "
-            "Here we will later add ATM strikes, option legs, premiums, break-even, max gain and max loss."
+            "This is the module where we will later add option legs, ATM logic, premiums, break-even, "
+            "max gain, max loss and indicative payoff diagrams."
         )
 
     st.markdown('</div>', unsafe_allow_html=True)
@@ -571,10 +582,7 @@ with tab2:
         st.write("- Long 1 ATM Put")
     elif strategy == "Short Put":
         st.write("- Short 1 ATM Put")
-    elif strategy == "Straddle":
-        st.write("- Long 1 ATM Call")
-        st.write("- Long 1 ATM Put")
-    elif strategy == "Cono Largo":
+    elif strategy in ["Straddle", "Cono Largo"]:
         st.write("- Long 1 ATM Call")
         st.write("- Long 1 ATM Put")
     elif strategy == "Cono Corto":
@@ -592,9 +600,9 @@ with tab2:
         st.write("- Short 2 Calls K2")
         st.write("- Long 1 Call K3")
     elif strategy == "Condor":
-        st.write("- Long 1 Option Wing")
+        st.write("- Long Wing")
         st.write("- Short Inner Spread")
-        st.write("- Long 1 Option Wing")
+        st.write("- Long Wing")
     elif strategy == "Long Stock":
         st.write("- Long Underlying")
     elif strategy == "Short Stock":
@@ -611,7 +619,7 @@ with tab3:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Scenario Analysis</div>', unsafe_allow_html=True)
 
-    st.write("This tab will evaluate how the selected strategy behaves under different market environments.")
+    st.write("This tab will evaluate how the selected strategy behaves under different market conditions.")
     st.write("Indicative scenarios to include:")
     st.write("- Bullish scenario")
     st.write("- Base scenario")
@@ -643,19 +651,17 @@ with tab4:
 
     if data:
         st.write(
-            f"The selected underlying is **{ticker}**, currently trading in **{data['currency']}**, "
+            f"The selected underlying is **{loaded_ticker}**, currently trading in **{data['currency']}**, "
             f"with an indicative USD reference price of **{format_number(data['price_usd'], prefix='$')}**. "
-            f"The selected strategy is **{strategy}**, under the **{strategy_family}** family, "
-            f"for a tenor of **{tenor}** and a notional investment of **${notional:,.0f}**."
+            f"The total note notional is **${total_note_notional:,.0f}**."
         )
         st.write(
-            "This interface is designed to combine market context, strategy construction, scenario evaluation "
-            "and executive-level communication in a single workflow."
+            "This interface is designed to separate market analysis, strategy construction, scenario evaluation "
+            "and executive communication into distinct modules."
         )
     else:
         st.write(
-            "Once market data is loaded, this section will summarize the underlying, selected structure, "
-            "tenor, notional and investment rationale."
+            "Once ticker data is loaded, this section will summarize the underlying, note notional and strategic rationale."
         )
 
     st.markdown('</div>', unsafe_allow_html=True)
